@@ -4,6 +4,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import searchengine.dto.statistics.ErrorResponse;
 import searchengine.dto.statistics.IndexingResponse;
 import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.services.IndexingService;
@@ -31,7 +32,7 @@ public class ApiController {
     }
 
     @GetMapping("/startIndexing")
-    public IndexingResponse startIndexing() throws ExecutionException, InterruptedException {
+    public IndexingResponse startIndexing() {
         indexingService.startIndexing();
         return new IndexingResponse(true);
     }

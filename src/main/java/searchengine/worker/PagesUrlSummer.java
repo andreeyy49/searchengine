@@ -13,6 +13,7 @@ import searchengine.services.SiteService;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RecursiveTask;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,6 +24,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
     private final SiteService siteService;
     private final PageUrl address;
     private String headAddress;
+    private static Set<String> addedUrls;
     private final Site parentSite;
     private static final Pattern HTTPS_PATTERN = Pattern.compile("https://[^/]+");
     private static final Pattern FULL_URL_PATTERN = Pattern.compile("https://[a-z]+[.a-z]+[/A-z-\\d()]*/[/a-z-\\d()]*");
@@ -46,9 +48,10 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
 
         address.setHeadUrl(headAddress);
         this.address = address;
+        addedUrls = ConcurrentHashMap.newKeySet();
     }
 
-    public PagesUrlSummer(PageUrl address, PageService pageService, SiteService siteService, String headAddress, Site parentSite) {
+    public PagesUrlSummer(PageUrl address, PageService pageService, SiteService siteService, String headAddress, Site parentSite, Set<String> addedUrls) {
         this.pageService = pageService;
         this.siteService = siteService;
         this.headAddress = headAddress;
@@ -80,9 +83,6 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
         page.setCode(200);
 
         synchronized (pageService) {
-            if (pageService.findByPath(page.getPath()) != null) {
-                return Collections.emptyList();
-            }
             pageService.save(page);
             log.info("added page {}", page.getPath());
         }
@@ -91,19 +91,18 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
 
         for (PageUrl children : this.address.getChildren()) {
             if (children != null) {
-                PagesUrlSummer task = new PagesUrlSummer(children, pageService, siteService, headAddress, site);
+                PagesUrlSummer task = new PagesUrlSummer(children, pageService, siteService, headAddress, site, addedUrls);
+                task.fork();
                 taskList.add(task);
             }
         }
-
-        invokeAll(taskList);
 
         for (PagesUrlSummer task : taskList) {
             if (task != null) {
                 try {
                     List<PageUrl> result = task.join();
                     if (result != null) {
-                        urls.addAll(result);  // Добавление только если result не null
+                        urls.addAll(result);
                     }
                 } catch (Exception e) {
                     log.error("Ошибка при выполнении задачи: {}", e.getMessage());
@@ -148,7 +147,9 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
                                 addressChildren = addressChildren.substring(start, end);
                             }
                             //--------------Проверка уникальности адреса--------------
-
+                            if (addedUrls.contains(addressChildren)) {
+                                break;
+                            }
                             addChildren(addressChildren, headAddress);
 
                             break;
@@ -164,6 +165,9 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
                                 addressChildren = addressChildren.substring(0, addressChildren.length() - 1);
                             }
                             //--------------Проверка уникальности адреса-------------
+                            if (addedUrls.contains("/" + addressChildren)) {
+                                break;
+                            }
                             addressChildren = headAddress + "/" + addressChildren;
                             addChildren(addressChildren, headAddress);
                             break;
@@ -200,6 +204,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
 
             //--------------Добавление нового ребенка--------------
             if (!newChildrenAddress.getAbsolutePath().isBlank()) {
+                addedUrls.add(newChildrenAddress.getPath());
                 List<PageUrl> children = address.getChildren();
                 children.add(newChildrenAddress);
                 address.setChildren(children);

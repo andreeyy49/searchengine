@@ -11,7 +11,6 @@ import searchengine.worker.PagesUrlSummer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 
@@ -26,80 +25,79 @@ public class IndexingService {
 
     private final SitesList sites;
 
-    private boolean isStartIndexing;
+    private static boolean isStartIndexing;
 
-    public void startIndexing() throws ExecutionException, InterruptedException {
-
-        long start = System.currentTimeMillis();
+    public void startIndexing() {
 
         if (isStartIndexing) {
             throw new IllegalStateException("Индексция уже запущена");
         }
 
-        isStartIndexing = true;
+        Thread thread = new Thread(() -> {
 
-        List<SiteConfig> siteConfigList = sites.getSiteConfigs();
-        List<Site> sitesToDb = new ArrayList<>();
+            long start = System.currentTimeMillis();
 
-        for (SiteConfig siteConfig : siteConfigList) {
-            Site newSite = new Site();
-            newSite.setUrl(siteConfig.getUrl());
-            newSite.setName(siteConfig.getName());
-            newSite.setStatus(Status.INDEXING);
-            newSite.setStatusTime(Instant.now());
-            Site oldSite = siteService.findByUrl(newSite.getUrl());
+            isStartIndexing = true;
 
-            if (oldSite != null) {
-                siteService.deleteById(oldSite.getId());
+            List<SiteConfig> siteConfigList = sites.getSiteConfigs();
+            List<Site> sitesToDb = new ArrayList<>();
+
+            for (SiteConfig siteConfig : siteConfigList) {
+                Site newSite = new Site();
+                newSite.setUrl(siteConfig.getUrl());
+                newSite.setName(siteConfig.getName());
+                newSite.setStatus(Status.INDEXING);
+                newSite.setStatusTime(Instant.now());
+                Site oldSite = siteService.findByUrl(newSite.getUrl());
+
+                if (oldSite != null) {
+                    siteService.deleteById(oldSite.getId());
+                }
+
+                sitesToDb.add(siteService.save(newSite));
             }
 
-            sitesToDb.add(siteService.save(newSite));
-        }
 
+            List<PageUrl> rootPageUrl = new ArrayList<>();
+            for (SiteConfig siteConfig : siteConfigList) {
+                rootPageUrl.add(new PageUrl(siteConfig.getUrl()));
+            }
 
-        List<PageUrl> rootPageUrl = new ArrayList<>();
-        for (SiteConfig siteConfig : siteConfigList) {
-            rootPageUrl.add(new PageUrl(siteConfig.getUrl()));
-        }
+            ForkJoinPool forkJoinPool = new ForkJoinPool(17);
+            List<Future<List<PageUrl>>> pagesUrlSummerFuture = new ArrayList<>();
 
-        ForkJoinPool forkJoinPool = new ForkJoinPool(17);
-        List<Future<List<PageUrl>>> pagesUrlSummerFuture = new ArrayList<>();
+            for (PageUrl pageUrl : rootPageUrl) {
+                pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService)));
+            }
 
-        for (PageUrl pageUrl : rootPageUrl) {
-            pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService)));
-        }
-
-        for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
-            pagesUrlSummer.get();
-        }
-
-        for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
-            while (!pagesUrlSummer.isDone()) {
-                if (!isStartIndexing) {
-                    for (Site site : sitesToDb) {
-                        site.setLastError("Индексация остановлена пользователем");
-                        site.setStatus(Status.FAILED);
-                        site.setStatusTime(Instant.now());
-                        siteService.update(site);
+            for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
+                while (!pagesUrlSummer.isDone()) {
+                    if (!isStartIndexing) {
+                        for (Site site : sitesToDb) {
+                            site.setLastError("Индексация остановлена пользователем");
+                            site.setStatus(Status.FAILED);
+                            site.setStatusTime(Instant.now());
+                            siteService.update(site);
+                        }
+                        forkJoinPool.shutdownNow();
+                        log.info("Индексация остановлена пользователем");
                     }
-                    pagesUrlSummer.cancel(true);
-                    throw new IllegalStateException("Индексация остановлена пользователем");
                 }
             }
-        }
 
-        for (SiteConfig siteConfig : siteConfigList) {
-            Site site = sitesToDb.stream().filter(el -> el.getUrl().equals(siteConfig.getUrl())).findFirst().get();
-            site.setStatus(Status.INDEXED);
-            site.setStatusTime(Instant.now());
-            siteService.update(site);
-        }
+            for (SiteConfig siteConfig : siteConfigList) {
+                Site site = sitesToDb.stream().filter(el -> el.getUrl().equals(siteConfig.getUrl())).findFirst().get();
+                site.setStatus(Status.INDEXED);
+                site.setStatusTime(Instant.now());
+                siteService.update(site);
+            }
 
-        isStartIndexing = false;
+            isStartIndexing = false;
 
-        forkJoinPool.shutdownNow();
+            log.info("Indexing finished " + (System.currentTimeMillis() - start) + "ms");
+        });
 
-        log.info("Indexing finished " + (System.currentTimeMillis() - start) + "ms");
+        thread.start();
     }
 
     public void stopIndexing() {
