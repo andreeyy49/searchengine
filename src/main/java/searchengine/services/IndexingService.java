@@ -1,15 +1,18 @@
 package searchengine.services;
 
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import searchengine.config.SitesList;
 import searchengine.config.SiteConfig;
 import searchengine.model.*;
+import searchengine.utils.LemmasFinder;
 import searchengine.worker.PagesUrlSummer;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
@@ -22,6 +25,10 @@ public class IndexingService {
     private final SiteService siteService;
 
     private final PageService pageService;
+
+    private final IndexingService indexingService;
+
+    private final LemmaService lemmaService;
 
     private final SitesList sites;
 
@@ -106,5 +113,31 @@ public class IndexingService {
         } else {
             throw new IllegalStateException("Индексация не запущена");
         }
+    }
+
+    @SneakyThrows
+    public void indexPage(String url) {
+        Page page = pageService.findByPath(url);
+
+        String content = page.getContent();
+
+        HashMap<String, Integer> lemmas = LemmasFinder.getLemmasHashMap(content);
+
+        for(HashMap.Entry<String, Integer> entry : lemmas.entrySet()) {
+            Lemma lemma = lemmaService.findByLemma(entry.getKey());
+            if(lemma == null) {
+                lemma = new Lemma();
+                lemma.setLemma(entry.getKey());
+                lemma.setFrequency(1);
+                lemma.setSite(page.getSite());
+                lemmaService.save(lemma);
+            } else {
+                lemma.setFrequency(lemma.getFrequency() + 1);
+                lemmaService.update(lemma);
+            }
+        }
+
+        Index index = new Index();
+        index.setPage(page);
     }
 }

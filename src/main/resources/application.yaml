@@ -8,8 +8,8 @@ indexing-settings:
 #      name: Лента.ру
 #    - url: https://www.skillbox.ru
 #      name: Skillbox
-    - url: https://www.playback.ru
-      name: PlayBack.Ru
+#    - url: https://www.playback.ru
+#      name: PlayBack.Ru
 
 server:
   port: 8080
@@ -22,5 +22,5 @@ spring:
     properties:
       dialect: org.hibernate.dialect.MySQL8Dialect
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true

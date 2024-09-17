@@ -27,8 +27,7 @@ public class Site {
     @Column(name = "status_time", nullable = false)
     private Instant statusTime;
 
-    @Column(columnDefinition = "TEXT",
-    name = "last_error")
+    @Column(columnDefinition = "TEXT", name = "last_error")
     private String lastError;
 
     @Column(columnDefinition = "VARCHAR(255)", nullable = false)
@@ -39,4 +38,7 @@ public class Site {
 
     @OneToMany(mappedBy = "site", cascade = CascadeType.ALL)
     private List<Page> pages = new ArrayList<>();
+
+    @OneToMany(mappedBy = "site", cascade = CascadeType.ALL)
+    private List<Lemma> lemmas = new ArrayList<>();
 }

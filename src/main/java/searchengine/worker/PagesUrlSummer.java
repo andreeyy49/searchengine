@@ -124,7 +124,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
                     .timeout(100000)
                     .get();
 
-            this.address.setContent(doc.toString());
+            this.address.setContent(doc.text());
             Elements element = doc.select("a");
             //--------------Ищу детей--------------
             for (Element el : element) {

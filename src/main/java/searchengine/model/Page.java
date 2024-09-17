@@ -1,9 +1,13 @@
 package searchengine.model;
 
 import jakarta.persistence.*;
+import jakarta.persistence.Index;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 @AllArgsConstructor
@@ -31,4 +35,7 @@ public class Page {
 
     @Column(columnDefinition = "MEDIUMTEXT", nullable = false)
     private String content;
+
+    @OneToMany(mappedBy = "page", cascade = CascadeType.ALL)
+    private List<searchengine.model.Index> indexes = new ArrayList<>();
 }
