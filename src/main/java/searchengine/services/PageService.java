@@ -2,8 +2,15 @@ package searchengine.services;
 
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
+import searchengine.config.SiteConfig;
+import searchengine.config.SitesList;
 import searchengine.model.Page;
+import searchengine.model.Site;
+import searchengine.model.Status;
 import searchengine.repository.PageRepository;
 import searchengine.utils.BeanUtils;
 
@@ -12,7 +19,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.text.MessageFormat;
+import java.time.Instant;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +31,10 @@ public class PageService {
     private final PageRepository repository;
 
     private final DataSource dataSource;
+
+    private final SiteService siteService;
+
+    private final SitesList sitesList;
 
     public List<Page> findAll() {
         return repository.findAll();
@@ -72,5 +86,41 @@ public class PageService {
     public String getContent(String path) {
         Page page = findByPath(path);
         return page.getContent();
+    }
+
+
+    @SneakyThrows
+    public Page initPage(String url, String pageUrl) {
+        String siteAddress = url.replace(pageUrl, "");
+        Page newPage = new Page();
+
+        Document doc = Jsoup.connect(url)
+                .userAgent("HeliontSearchBot/1.0")
+                .referrer("http://www.google.com")
+                .timeout(100000)
+                .get();
+
+        Site site = siteService.findByUrl(siteAddress);
+
+        if(sitesList.findBySiteUrl(siteAddress) == null) {
+            throw new IllegalStateException("Данная страница находится за пределами сайтов, " +
+                    "указанных в конфигурационном файле");
+        }
+
+        if(site == null)  {
+            site = new Site();
+            site.setUrl(siteAddress);
+            site.setStatus(Status.INDEXED);
+            site.setStatusTime(Instant.now());
+            site.setName(sitesList.findBySiteUrl(siteAddress).getName());
+            siteService.save(site);
+        }
+
+        newPage.setContent(doc.text());
+        newPage.setSite(site);
+        newPage.setPath(url.replace(siteAddress, ""));
+        newPage.setCode(200);
+
+        return newPage;
     }
 }

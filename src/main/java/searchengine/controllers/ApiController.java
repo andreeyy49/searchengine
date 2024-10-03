@@ -1,10 +1,7 @@
 package searchengine.controllers;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import searchengine.dto.statistics.ErrorResponse;
 import searchengine.dto.statistics.IndexingResponse;
 import searchengine.dto.statistics.StatisticsResponse;
@@ -45,7 +42,7 @@ public class ApiController {
     }
 
     @PostMapping("/indexPage")
-    public IndexingResponse indexPage(String url) {
+    public IndexingResponse indexPage(@RequestParam String url) {
         indexingService.indexPage(url);
         return new IndexingResponse(true);
     }

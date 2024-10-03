@@ -13,4 +13,14 @@ import java.util.List;
 @ConfigurationProperties(prefix = "indexing-settings")
 public class SitesList {
     private List<SiteConfig> siteConfigs;
+
+    public SiteConfig findBySiteUrl(String url) {
+        for (SiteConfig siteConfig : siteConfigs) {
+            if(siteConfig.getUrl().equals(url)) {
+                return siteConfig;
+            }
+        }
+
+        return null;
+    }
 }

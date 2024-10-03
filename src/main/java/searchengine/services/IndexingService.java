@@ -4,18 +4,22 @@ import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.SitesList;
 import searchengine.config.SiteConfig;
 import searchengine.model.*;
 import searchengine.utils.LemmasFinder;
 import searchengine.worker.PagesUrlSummer;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.Future;
+import java.util.Map;
+import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -26,13 +30,15 @@ public class IndexingService {
 
     private final PageService pageService;
 
-    private final IndexingService indexingService;
-
     private final LemmaService lemmaService;
 
     private final SitesList sites;
 
     private static boolean isStartIndexing;
+
+    private final IndexService indexService;
+
+    private static final Pattern HTTPS_PATTERN = Pattern.compile("https://[^/]+");
 
     public void startIndexing() {
 
@@ -74,7 +80,7 @@ public class IndexingService {
             List<Future<List<PageUrl>>> pagesUrlSummerFuture = new ArrayList<>();
 
             for (PageUrl pageUrl : rootPageUrl) {
-                pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService)));
+                pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService, lemmaService, indexService, this)));
             }
 
             for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
@@ -117,27 +123,101 @@ public class IndexingService {
 
     @SneakyThrows
     public void indexPage(String url) {
-        Page page = pageService.findByPath(url);
+        long startTime = System.currentTimeMillis();
+
+        String pageUrl;
+
+        String siteUrl = "";
+
+        Matcher matcher = HTTPS_PATTERN.matcher(url);
+
+        while (matcher.find()) {
+            int start = matcher.start();
+            int end = matcher.end();
+            siteUrl = url.substring(start, end);
+        }
+
+        pageUrl = url.replace(siteUrl, "");
+
+        Page page = pageService.findByPath(pageUrl);
+
+        if (page != null) {
+            pageService.delete(page.getId());
+        } else {
+            page = pageService.initPage(url, pageUrl);
+            pageService.save(page);
+        }
 
         String content = page.getContent();
 
         HashMap<String, Integer> lemmas = LemmasFinder.getLemmasHashMap(content);
 
-        for(HashMap.Entry<String, Integer> entry : lemmas.entrySet()) {
-            Lemma lemma = lemmaService.findByLemma(entry.getKey());
-            if(lemma == null) {
-                lemma = new Lemma();
+        log.info("Starting get LemmasHashMap");
+
+        List<String> lemmasInDb = lemmaService.findAllLemmaValue();
+        if (lemmasInDb == null) {
+            lemmasInDb = new ArrayList<>();
+        }
+
+        List<Lemma> lemmasToSave = new ArrayList<>();
+        List<Index> indexesToSave = new ArrayList<>();
+
+        for (HashMap.Entry<String, Integer> entry : lemmas.entrySet()) {
+            Index index = new Index();
+            index.setPage(page);
+            index.setRank(entry.getValue());
+            if (!lemmasInDb.contains(entry.getKey())) {
+                Lemma lemma = new Lemma();
                 lemma.setLemma(entry.getKey());
                 lemma.setFrequency(1);
                 lemma.setSite(page.getSite());
-                lemmaService.save(lemma);
+                List<Index> indexes = new ArrayList<>();
+                indexes.add(index);
+                lemma.setIndexes(indexes);
+                index.setLemma(lemma);
+                lemmasToSave.add(lemma);
+                indexesToSave.add(index);
             } else {
+                Lemma lemma = lemmaService.findByLemma(entry.getKey());
                 lemma.setFrequency(lemma.getFrequency() + 1);
-                lemmaService.update(lemma);
+                List<Index> indexes = lemma.getIndexes();
+                indexes.add(index);
+                lemma.setIndexes(indexes);
+                index.setLemma(lemma);
+                lemmasToSave.add(lemma);
+                indexesToSave.add(index);
             }
+            lemmasInDb.add(entry.getKey());
         }
 
-        Index index = new Index();
-        index.setPage(page);
+        lemmaService.saveAll(lemmasToSave);
+        indexService.saveAll(indexesToSave);
+
+        log.info("indexing finished {}ms", System.currentTimeMillis() - startTime);
     }
+
+    private List<HashMap<String, Integer>> splitHashmap(HashMap<String, Integer> hashMap) {
+        List<HashMap<String, Integer>> listMap = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            listMap.add(new HashMap<>());
+        }
+
+        int count = 0;
+        for (Map.Entry<String, Integer> entry : hashMap.entrySet()) {
+            int index = count % 4;
+            if (index == 0) {
+                listMap.get(index).put(entry.getKey(), entry.getValue());
+            } else if (index == 1) {
+                listMap.get(index).put(entry.getKey(), entry.getValue());
+            } else if (index == 2) {
+                listMap.get(index).put(entry.getKey(), entry.getValue());
+            } else if (index == 3) {
+                listMap.get(index).put(entry.getKey(), entry.getValue());
+            }
+            count++;
+        }
+
+        return listMap;
+    }
+
 }

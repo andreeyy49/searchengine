@@ -28,6 +28,10 @@ public class IndexService {
         return indexRepository.save(index);
     }
 
+    public List<Index> saveAll(List<Index> indexes) {
+        return indexRepository.saveAll(indexes);
+    }
+
     public Index update(Index index) {
         Index oldIndex = findById(index.getId());
         BeanUtils.copyNotNullProperties(index, oldIndex);

@@ -16,14 +16,14 @@ public class Index {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "page_id")
     private Page page;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "lemma_id")
     private Lemma lemma;
 
-    @Column(columnDefinition = "FLOAT", nullable = false)
-    private Float rank;
+    @Column(nullable = false, name = "`rank`")
+    private Integer rank;
 }
