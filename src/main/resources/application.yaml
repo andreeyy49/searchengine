@@ -15,12 +15,21 @@ server:
   port: 8080
 spring:
   datasource:
-    username: root
-    password: root  
-    url: jdbc:mysql://localhost:3306/search_engine?useSSL=false&requireSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: postgres
+    password: postgres
+    url: jdbc:postgresql://localhost:5432/search_engine_db?useSSL=false&requireSSL=false&allowPublicKeyRetrieval=true
+    hikari:
+      schema: search_engine_schema
+      connection-timeout: 10000
   jpa:
     properties:
-      dialect: org.hibernate.dialect.MySQL8Dialect
+#      dialect: org.hibernate.dialect.MySQL8Dialect
+      hibernate:
+        default_schema: public
     hibernate:
-      ddl-auto: create
+      ddl-auto: none
     show-sql: true
+  flyway:
+    url: jdbc:postgresql://localhost:5432/search_engine_db
+    user: postgres
+    password: postgres

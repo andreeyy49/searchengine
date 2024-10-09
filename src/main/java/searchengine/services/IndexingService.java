@@ -9,14 +9,12 @@ import searchengine.config.SitesList;
 import searchengine.config.SiteConfig;
 import searchengine.model.*;
 import searchengine.utils.LemmasFinder;
+import searchengine.worker.PageIndexingWorker;
 import searchengine.worker.PagesUrlSummer;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +37,8 @@ public class IndexingService {
     private final IndexService indexService;
 
     private static final Pattern HTTPS_PATTERN = Pattern.compile("https://[^/]+");
+
+    private final int processorSize = Runtime.getRuntime().availableProcessors();
 
     public void startIndexing() {
 
@@ -76,11 +76,12 @@ public class IndexingService {
                 rootPageUrl.add(new PageUrl(siteConfig.getUrl()));
             }
 
-            ForkJoinPool forkJoinPool = new ForkJoinPool(17);
+            ForkJoinPool forkJoinPool = new ForkJoinPool(processorSize + 1);
             List<Future<List<PageUrl>>> pagesUrlSummerFuture = new ArrayList<>();
+            Future<List<Lemma>> lemmaIndexingFuture;
 
             for (PageUrl pageUrl : rootPageUrl) {
-                pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService, lemmaService, indexService, this)));
+                pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService)));
             }
 
             for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
@@ -95,6 +96,24 @@ public class IndexingService {
                         forkJoinPool.shutdownNow();
                         log.info("Индексация остановлена пользователем");
                     }
+                }
+            }
+
+            List<Page> pages = pageService.findAll();
+            Set<Page> pageSet = new HashSet<>(pages);
+
+            lemmaIndexingFuture = forkJoinPool.submit(new PageIndexingWorker(pageSet, lemmaService));
+
+            while (!lemmaIndexingFuture.isDone()) {
+                if (!isStartIndexing) {
+                    for (Site site : sitesToDb) {
+                        site.setLastError("Индексация остановлена пользователем");
+                        site.setStatus(Status.FAILED);
+                        site.setStatusTime(Instant.now());
+                        siteService.update(site);
+                    }
+                    forkJoinPool.shutdownNow();
+                    log.info("Индексация остановлена пользователем");
                 }
             }
 

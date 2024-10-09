@@ -4,7 +4,6 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.BatchSize;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +30,5 @@ public class Lemma {
     private Integer frequency;
 
     @OneToMany(mappedBy = "lemma", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
-    @BatchSize(size = 100)
     private List<Index> indexes = new ArrayList<>();
 }
