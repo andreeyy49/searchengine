@@ -29,6 +29,8 @@ CREATE TABLE lemmas
     CONSTRAINT fk_lemmas_site FOREIGN KEY (site_id) REFERENCES sites (id) ON DELETE CASCADE
 );
 
+CREATE  INDEX idx_lemma_value ON lemmas (lemma);
+
 CREATE TABLE indexes
 (
     id       SERIAL PRIMARY KEY,
