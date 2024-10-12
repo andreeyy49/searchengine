@@ -17,16 +17,19 @@ public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
     private final LemmaService lemmaService;
     private int size;
     private final int processorSize;
+
     private static Set<String> addedLemmasValues;
-    private static Set<Lemma> addedLemmas;
+
+    private final Object saveLock = new Object();
+    private final Object checkLock = new Object();
 
     public PageIndexingWorker(Set<Page> pages, LemmaService lemmaService) {
         this.pages = ConcurrentHashMap.newKeySet();
         this.pages.addAll(pages);
         this.lemmaService = lemmaService;
         this.processorSize = getProcessorSize();
+
         addedLemmasValues = ConcurrentHashMap.newKeySet();
-        addedLemmas = ConcurrentHashMap.newKeySet();
     }
 
     public PageIndexingWorker(Set<Page> pages, LemmaService lemmaService, int size) {
@@ -63,9 +66,9 @@ public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
         } else {
             for (Page page : pages) {
                 List<Lemma> lemmas = addLemmas(page);
-                synchronized (lemmaService) {
-                    List<Lemma> lemmaList = lemmaService.saveAll(lemmas);
-                    addedLemmas.addAll(lemmaList);
+                synchronized (saveLock) {
+                    lemmaService.saveAll(lemmas);
+
                     log.info("added {} lemmas", lemmas.size());
                 }
             }
@@ -115,7 +118,14 @@ public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
                 index.setPage(page);
                 index.setRank(entry.getValue());
                 Lemma lemma = null;
-                if (!addedLemmasValues.contains(entry.getKey())) {
+
+                if(addedLemmasValues.contains(entry.getKey())) {
+                    synchronized (checkLock) {
+                        lemma = lemmaService.findByLemma(entry.getKey());
+                    }
+                }
+
+                if (lemma == null) {
                     lemma = new Lemma();
                     lemma.setLemma(entry.getKey());
                     lemma.setFrequency(1);
@@ -127,10 +137,6 @@ public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
                     lemmasToSave.add(lemma);
                     addedLemmasValues.add(entry.getKey());
                 } else {
-                    while (lemma == null) {
-                        log.info("WAIT");
-                        lemma = addedLemmas.stream().filter(el -> el.getLemma().equals(entry.getKey())).findFirst().orElse(null);
-                    }
                     lemma.setFrequency(lemma.getFrequency() + 1);
                     List<Index> indexes = lemma.getIndexes();
                     indexes.add(index);

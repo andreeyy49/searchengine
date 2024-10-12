@@ -8,6 +8,8 @@ CREATE TABLE sites
     name        VARCHAR(255) NOT NULL
 );
 
+CREATE INDEX idx_site_id ON sites (id);
+
 CREATE TABLE pages
 (
     id      SERIAL PRIMARY KEY,
@@ -19,6 +21,7 @@ CREATE TABLE pages
 );
 
 CREATE INDEX idx_path ON pages (path);
+CREATE INDEX idx_page_id ON pages (id);
 
 CREATE TABLE lemmas
 (
@@ -28,6 +31,8 @@ CREATE TABLE lemmas
     frequency INT          NOT NULL,
     CONSTRAINT fk_lemmas_site FOREIGN KEY (site_id) REFERENCES sites (id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_lemma ON lemmas (lemma);
 
 CREATE TABLE indexes
 (
@@ -39,3 +44,6 @@ CREATE TABLE indexes
     CONSTRAINT fk_indexes_page FOREIGN KEY (page_id) REFERENCES pages (id) ON DELETE CASCADE,
     CONSTRAINT fk_indexes_lemma FOREIGN KEY (lemma_id) REFERENCES lemmas (id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_lemma_id ON indexes (lemma_id);
+
