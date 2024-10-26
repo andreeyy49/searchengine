@@ -3,98 +3,73 @@ package searchengine.worker;
 import lombok.extern.slf4j.Slf4j;
 import searchengine.model.*;
 import searchengine.services.LemmaService;
+import searchengine.services.RedisLemmaService;
 import searchengine.utils.LemmasFinder;
 
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RecursiveTask;
+
 @Slf4j
 public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
 
     private final Set<Page> pages;
+    private final Site site;
+
     private final LemmaService lemmaService;
-    private int size;
-    private final int processorSize;
+    private final RedisLemmaService redisLemmaService;
 
-//    private static Map<String, Lemma> addedLemmaMap;
-    private static Set<String> addedLemmasValues;
 
-    private final Object saveLock = new Object();
-    private final Object checkLock = new Object();
-
-    public PageIndexingWorker(Set<Page> pages, LemmaService lemmaService) {
+    public PageIndexingWorker(Set<Page> pages, Site site, LemmaService lemmaService, RedisLemmaService redisLemmaService) {
         this.pages = ConcurrentHashMap.newKeySet();
         this.pages.addAll(pages);
+        this.site = site;
         this.lemmaService = lemmaService;
-        this.processorSize = getProcessorSize();
-
-        addedLemmasValues = ConcurrentHashMap.newKeySet();
-//        addedLemmaMap = new ConcurrentHashMap<>();
-    }
-
-    public PageIndexingWorker(Set<Page> pages, LemmaService lemmaService, int size) {
-        this.pages = ConcurrentHashMap.newKeySet();
-        this.pages.addAll(pages);
-        this.lemmaService = lemmaService;
-        this.size = size;
-        this.processorSize = getProcessorSize();
+        this.redisLemmaService = redisLemmaService;
     }
 
     @Override
     protected List<Lemma> compute() {
-
-        List<Lemma> lemmasToReturn = new ArrayList<>();
-
-        List<PageIndexingWorker> taskList = new ArrayList<>();
-
-        if (size > (pages.size() / processorSize - 1)) {
-            Set<Page> leftSet = splitSet(SetSide.LEFT);
-            Set<Page> rightSet = splitSet(SetSide.RIGHT);
-
-            PageIndexingWorker leftTask = new PageIndexingWorker(leftSet, this.lemmaService, this.size);
-            PageIndexingWorker rightTask = new PageIndexingWorker(rightSet, this.lemmaService, this.size);
-
-            if (!leftSet.isEmpty()) {
-                leftTask.fork();
-                taskList.add(leftTask);
-            }
-            if (!rightSet.isEmpty()) {
-                rightTask.fork();
-                taskList.add(rightTask);
-            }
-
-        } else {
-            for (Page page : pages) {
-                long start = System.currentTimeMillis();
-                List<Lemma> lemmas = addLemmas(page);
-                synchronized (saveLock) {
-
-                    lemmaService.saveAll(lemmas);
-
-//                    updateBufferWithDbLemmas(lemmaService.saveAll(lemmas), addedLemmaMap);
-
-                    log.info("added {} lemmas, is: {}ms", lemmas.size(), System.currentTimeMillis() - start);
-                }
-            }
-        }
-
-        for (PageIndexingWorker task : taskList) {
-            if (task != null) {
-                try {
-                    List<Lemma> result = task.join();
-                    if (result != null) {
-                        lemmasToReturn.addAll(result);
+        try {
+            List<Lemma> lemmasToReturn = new ArrayList<>();
+            if (pages.size() == 1) {
+                for (Page page : pages) {
+                    long start = System.currentTimeMillis();
+                    List<Lemma> lemmas = addLemmas(page);
+                    try {
+                        synchronized (lemmaService) {
+                            lemmaService.saveAll(lemmas);
+                        }
+                    } catch (Exception e) {
+                        log.error(e.getMessage());
                     }
-                } catch (Exception e) {
-                    log.error("Ошибка при выполнении задачи: {0}", e);
+                    log.info("added {} lemmas, is: {}ms", lemmas.size(), System.currentTimeMillis() - start);
+                    lemmasToReturn.addAll(lemmas);
                 }
+            } else {
+                List<PageIndexingWorker> tasks = new ArrayList<>();
+                tasks.add(new PageIndexingWorker(splitSet(SetSide.LEFT), site, lemmaService, redisLemmaService));
+                tasks.add(new PageIndexingWorker(splitSet(SetSide.RIGHT), site, lemmaService, redisLemmaService));
+                invokeAll(tasks);
+
+                for (PageIndexingWorker task : tasks) {
+                    if (task != null) {
+                        List<Lemma> results = task.join();
+                        if(results != null) {
+                            lemmasToReturn.addAll(results);
+                        }
+                    }
+                }
+                return lemmasToReturn;
             }
+        } catch (Exception e) {
+            log.error(e.getMessage());
+            e.printStackTrace();
         }
-
-
-        return lemmasToReturn;
+        return null;
     }
+
 
     private Set<Page> splitSet(SetSide setSide) {
         List<Page> pageList = new ArrayList<>(this.pages);
@@ -120,67 +95,24 @@ public class PageIndexingWorker extends RecursiveTask<List<Lemma>> {
             HashMap<String, Integer> lemmas = LemmasFinder.getLemmasHashMap(page.getContent());
 
             for (HashMap.Entry<String, Integer> entry : lemmas.entrySet()) {
+                Lemma lemma = new Lemma();
                 Index index = new Index();
                 index.setPage(page);
                 index.setRank(entry.getValue());
-                Lemma lemma = null;
-
-//                if (addedLemmaMap.containsKey(entry.getKey())) {
-//                    do {
-//                        lemma = addedLemmaMap.get(entry.getKey());
-//                    }
-//                    while (lemma == null);
-//                }
-
-                if(addedLemmasValues.contains(entry.getKey())) {
-                    synchronized (checkLock) {
-                        lemma = lemmaService.findByLemma(entry.getKey());
-                    }
-                }
-
-                if (lemma == null) {
-                    lemma = new Lemma();
-                    lemma.setLemma(entry.getKey());
-                    lemma.setFrequency(1);
-                    lemma.setSite(page.getSite());
-                    List<Index> indexes = new ArrayList<>();
-                    indexes.add(index);
-                    lemma.setIndexes(indexes);
-                    index.setLemma(lemma);
-                    lemmasToSave.add(lemma);
-                    addedLemmasValues.add(entry.getKey());
-//                    addedLemmaMap.put(entry.getKey(), lemma);
-                } else {
-                    lemma.setFrequency(lemma.getFrequency() + 1);
-                    List<Index> indexes = lemma.getIndexes();
-                    indexes.add(index);
-                    lemma.setIndexes(indexes);
-                    index.setLemma(lemma);
-                    lemmasToSave.add(lemma);
-                }
+                lemma.setLemma(entry.getKey());
+                lemma.setFrequency(1);
+                lemma.setSite(site);
+                List<Index> indexes = new ArrayList<>();
+                indexes.add(index);
+                lemma.setIndexes(indexes);
+                index.setLemma(lemma);
+                lemmasToSave.add(lemma);
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
 
+        log.info("Executing task in thread: {}", Thread.currentThread().getName());
         return lemmasToSave;
-    }
-
-    private int getProcessorSize() {
-        Runtime runtime = Runtime.getRuntime();
-
-        return runtime.availableProcessors() + 1;
-    }
-
-    public void updateBufferWithDbLemmas(List<Lemma> dbLemmas, Map<String, Lemma> bufferMap) {
-        for (Lemma dbLemma : dbLemmas) {
-            if (bufferMap.containsKey(dbLemma.getLemma())) {
-                Lemma bufferLemma = bufferMap.get(dbLemma.getLemma());
-                bufferLemma.setFrequency(dbLemma.getFrequency());
-                bufferLemma.setIndexes(dbLemma.getIndexes());
-            } else {
-                bufferMap.put(dbLemma.getLemma(), dbLemma);
-            }
-        }
     }
 }

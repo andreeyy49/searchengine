@@ -28,6 +28,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
 
     private static final Pattern HTTPS_PATTERN = Pattern.compile("https://[^/]+");
     private static final Pattern RELATIVE_URL_PATTERN = Pattern.compile("/[a-z+]+[/A-z- \\d%#()+_.]*/([/a-z- \\d%#()+_.]*)*");
+    private static final Pattern FULL_URL_PATTERN = Pattern.compile("https://[a-z]+[.a-z]+[/A-z-\\d()]*/[/a-z-\\d()]*");
 
     public PagesUrlSummer(PageUrl address, PageService pageService, SiteService siteService) {
         this.pageService = pageService;
@@ -64,7 +65,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
     protected List<PageUrl> compute() {
         List<PageUrl> urls = new ArrayList<>();
 
-        if(!connection()) {
+        if (!connection()) {
             return null;
         }
 
@@ -130,7 +131,7 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
                     .timeout(100000)
                     .get();
 
-            this.address.setContent(doc.text());
+            this.address.setContent(doc.toString());
             Elements element = doc.select("a");
             //--------------Ищу детей--------------
             for (Element el : element) {
@@ -139,21 +140,42 @@ public class PagesUrlSummer extends RecursiveTask<List<PageUrl>> {
                 if (urlFilter(addressChildren)) {
                     continue;
                 }
-                if (addressChildren.contains("href=\"")) {
 
-                    Matcher matcher = RELATIVE_URL_PATTERN.matcher(addressChildren);
-                    while (matcher.find()) {
-                        int start = matcher.start();
-                        int end = matcher.end();
-                        addressChildren = addressChildren.substring(start + 1, end);
-                        addressChildren = deleteEndsSlash(addressChildren);
-                        //--------------Проверка уникальности адреса-------------
-                        if (addedUrls.contains("/" + addressChildren)) {
+                if (addressChildren.contains("href=\"")) {
+                    if (addressChildren.contains("https://") || addressChildren.contains("http://")) {
+                        Matcher matcher = FULL_URL_PATTERN.matcher(addressChildren);
+                        while (matcher.find()) {
+                            int start = matcher.start();
+                            int end = matcher.end();
+                            if (addressChildren.charAt(end - 1) == '/') {
+                                addressChildren = addressChildren.substring(start, end - 1);
+                            } else {
+                                addressChildren = addressChildren.substring(start, end);
+                            }
+                            //--------------Проверка уникальности адреса--------------
+                            if (addedUrls.contains(addressChildren)) {
+                                break;
+                            }
+                            addChildren(addressChildren, headAddress);
+
+                            break;
+
+                        }
+                    } else {
+                        Matcher matcher = RELATIVE_URL_PATTERN.matcher(addressChildren);
+                        while (matcher.find()) {
+                            int start = matcher.start();
+                            int end = matcher.end();
+                            addressChildren = addressChildren.substring(start + 1, end);
+                            addressChildren = deleteEndsSlash(addressChildren);
+                            //--------------Проверка уникальности адреса-------------
+                            if (addedUrls.contains("/" + addressChildren)) {
+                                break;
+                            }
+                            addressChildren = headAddress + "/" + addressChildren;
+                            addChildren(addressChildren, headAddress);
                             break;
                         }
-                        addressChildren = headAddress + "/" + addressChildren;
-                        addChildren(addressChildren, headAddress);
-                        break;
                     }
                 }
             }

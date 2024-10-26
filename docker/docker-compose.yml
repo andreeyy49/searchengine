@@ -11,3 +11,8 @@ services:
       - POSTGRES_DB=search_engine_db
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.s
+
+  redis:
+    image: redis:7.0.12
+    ports:
+      - "6379:6379"

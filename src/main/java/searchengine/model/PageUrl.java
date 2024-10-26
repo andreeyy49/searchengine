@@ -23,9 +23,4 @@ public class PageUrl {
     public PageUrl(String absolutePath) {
         this.absolutePath = absolutePath;
     }
-
-
-    public void addChild(PageUrl child) {
-        children.add(child);
-    }
 }

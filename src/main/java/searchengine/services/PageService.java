@@ -6,7 +6,6 @@ import lombok.SneakyThrows;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
-import searchengine.config.SiteConfig;
 import searchengine.config.SitesList;
 import searchengine.model.Page;
 import searchengine.model.Site;
@@ -15,14 +14,9 @@ import searchengine.repository.PageRepository;
 import searchengine.utils.BeanUtils;
 
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -48,29 +42,16 @@ public class PageService {
         return repository.findByPath(path).orElse(null);
     }
 
-    public Page save(Page page) {
-        return repository.save(page);
+    public List<Page> findBySite(Site site) {
+        return repository.findBySite(site);
     }
 
-    public List<Page> saveAll(List<Page> pages) throws SQLException {
-        String sql = "INSERT INTO pages (code, content, path, site_id) VALUES (?, ?, ?, ?)";
+    public List<Page> findAllByIndexes(List<Long> indexIds) {
+        return repository.findByIndexIds(indexIds);
+    }
 
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement pstmt = connection.prepareStatement(sql)) {
-
-            for (Page page : pages) {
-                pstmt.setString(1, String.valueOf(page.getCode()));
-                pstmt.setString(2, page.getContent());
-                pstmt.setString(3, page.getPath());
-                pstmt.setLong(4, page.getSite().getId());
-                pstmt.addBatch();
-            }
-
-            pstmt.executeBatch();
-            pstmt.close();
-            connection.close();
-            return pages;
-        }
+    public Page save(Page page) {
+        return repository.save(page);
     }
 
     public Page update(Page page) {
@@ -102,12 +83,12 @@ public class PageService {
 
         Site site = siteService.findByUrl(siteAddress);
 
-        if(sitesList.findBySiteUrl(siteAddress) == null) {
+        if (sitesList.findBySiteUrl(siteAddress) == null) {
             throw new IllegalStateException("Данная страница находится за пределами сайтов, " +
                     "указанных в конфигурационном файле");
         }
 
-        if(site == null)  {
+        if (site == null) {
             site = new Site();
             site.setUrl(siteAddress);
             site.setStatus(Status.INDEXED);

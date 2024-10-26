@@ -3,16 +3,17 @@ package searchengine.services;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import searchengine.config.SitesList;
 import searchengine.config.SiteConfig;
+import searchengine.dto.statistics.DataResponse;
 import searchengine.model.*;
 import searchengine.utils.LemmasFinder;
 import searchengine.worker.PageIndexingWorker;
 import searchengine.worker.PagesUrlSummer;
 
-import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -30,6 +31,8 @@ public class IndexingService {
 
     private final LemmaService lemmaService;
 
+    private final RedisLemmaService redisLemmaService;
+
     private final SitesList sites;
 
     private static boolean isStartIndexing;
@@ -45,6 +48,8 @@ public class IndexingService {
         if (isStartIndexing) {
             throw new IllegalStateException("Индексция уже запущена");
         }
+
+        redisLemmaService.clearAllCaches();
 
         Thread thread = new Thread(() -> {
 
@@ -78,7 +83,6 @@ public class IndexingService {
 
             ForkJoinPool forkJoinPool = new ForkJoinPool(processorSize + 1);
             List<Future<List<PageUrl>>> pagesUrlSummerFuture = new ArrayList<>();
-            Future<List<Lemma>> lemmaIndexingFuture;
 
             for (PageUrl pageUrl : rootPageUrl) {
                 pagesUrlSummerFuture.add(forkJoinPool.submit(new PagesUrlSummer(pageUrl, pageService, siteService)));
@@ -86,34 +90,21 @@ public class IndexingService {
 
             for (Future<List<PageUrl>> pagesUrlSummer : pagesUrlSummerFuture) {
                 while (!pagesUrlSummer.isDone()) {
-                    if (!isStartIndexing) {
-                        for (Site site : sitesToDb) {
-                            site.setLastError("Индексация остановлена пользователем");
-                            site.setStatus(Status.FAILED);
-                            site.setStatusTime(Instant.now());
-                            siteService.update(site);
-                        }
-                        forkJoinPool.shutdownNow();
-                        log.info("Индексация остановлена пользователем");
-                    }
+                    stopWorkers(sitesToDb, forkJoinPool);
                 }
             }
 
-            List<Page> pages = pageService.findAll();
-            Set<Page> pageSet = new HashSet<>(pages);
+            List<Future<List<Lemma>>> tasksPageIndexWorkerFuture = new ArrayList<>();
 
-            lemmaIndexingFuture = forkJoinPool.submit(new PageIndexingWorker(pageSet, lemmaService));
+            for (Site site : sitesToDb) {
+                List<Page> pages = pageService.findBySite(site);
 
-            while (!lemmaIndexingFuture.isDone()) {
-                if (!isStartIndexing) {
-                    for (Site site : sitesToDb) {
-                        site.setLastError("Индексация остановлена пользователем");
-                        site.setStatus(Status.FAILED);
-                        site.setStatusTime(Instant.now());
-                        siteService.update(site);
-                    }
-                    forkJoinPool.shutdownNow();
-                    log.info("Индексация остановлена пользователем");
+                tasksPageIndexWorkerFuture.add(forkJoinPool.submit(new PageIndexingWorker(new HashSet<>(pages), site, lemmaService, redisLemmaService)));
+            }
+
+            for (Future<List<Lemma>> task : tasksPageIndexWorkerFuture) {
+                while (!task.isDone()) {
+                    stopWorkers(sitesToDb, forkJoinPool);
                 }
             }
 
@@ -126,7 +117,7 @@ public class IndexingService {
 
             isStartIndexing = false;
 
-            log.info("Indexing finished " + (System.currentTimeMillis() - start) + "ms");
+            log.info("Indexing finished {}ms", System.currentTimeMillis() - start);
         });
 
         thread.start();
@@ -185,27 +176,17 @@ public class IndexingService {
             Index index = new Index();
             index.setPage(page);
             index.setRank(entry.getValue());
-            if (!lemmasInDb.contains(entry.getKey())) {
-                Lemma lemma = new Lemma();
-                lemma.setLemma(entry.getKey());
-                lemma.setFrequency(1);
-                lemma.setSite(page.getSite());
-                List<Index> indexes = new ArrayList<>();
-                indexes.add(index);
-                lemma.setIndexes(indexes);
-                index.setLemma(lemma);
-                lemmasToSave.add(lemma);
-                indexesToSave.add(index);
-            } else {
-                Lemma lemma = lemmaService.findByLemma(entry.getKey());
-                lemma.setFrequency(lemma.getFrequency() + 1);
-                List<Index> indexes = lemma.getIndexes();
-                indexes.add(index);
-                lemma.setIndexes(indexes);
-                index.setLemma(lemma);
-                lemmasToSave.add(lemma);
-                indexesToSave.add(index);
-            }
+            Lemma lemma = new Lemma();
+            lemma.setLemma(entry.getKey());
+            lemma.setFrequency(1);
+            lemma.setSite(page.getSite());
+            List<Index> indexes = new ArrayList<>();
+            indexes.add(index);
+            lemma.setIndexes(indexes);
+            index.setLemma(lemma);
+            lemmasToSave.add(lemma);
+            indexesToSave.add(index);
+
             lemmasInDb.add(entry.getKey());
         }
 
@@ -215,28 +196,168 @@ public class IndexingService {
         log.info("indexing finished {}ms", System.currentTimeMillis() - startTime);
     }
 
-    private List<HashMap<String, Integer>> splitHashmap(HashMap<String, Integer> hashMap) {
-        List<HashMap<String, Integer>> listMap = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
-            listMap.add(new HashMap<>());
+    @SneakyThrows
+    public List<DataResponse> search(String query, String site, Integer offset, Integer limit) {
+        if (offset == null) {
+            offset = 0;
+        }
+        if (limit == null) {
+            limit = 20;
         }
 
-        int count = 0;
-        for (Map.Entry<String, Integer> entry : hashMap.entrySet()) {
-            int index = count % 4;
-            if (index == 0) {
-                listMap.get(index).put(entry.getKey(), entry.getValue());
-            } else if (index == 1) {
-                listMap.get(index).put(entry.getKey(), entry.getValue());
-            } else if (index == 2) {
-                listMap.get(index).put(entry.getKey(), entry.getValue());
-            } else if (index == 3) {
-                listMap.get(index).put(entry.getKey(), entry.getValue());
+        if(query.isEmpty()) {
+            throw new IllegalStateException("Задан пустой поисковый запрос!");
+        }
+
+        HashMap<String, Integer> queryLemmas = LemmasFinder.getLemmasHashMap(query);
+        List<Lemma> lemmasInDb = new ArrayList<>();
+        List<Page> allPages = pageService.findAll();
+        int totalPagesSize = allPages.size();
+        List<String> sitesUrl = new ArrayList<>();
+
+        if (site == null) {
+            sitesUrl.addAll(siteService.findAll().stream().map(siteElement -> {
+                if (siteElement.getStatus().equals(Status.INDEXED)) {
+                    return siteElement.getUrl();
+                }
+                return null;
+            }).filter(Objects::nonNull).toList());
+        } else {
+            sitesUrl.add(site);
+        }
+
+        if (sitesUrl.isEmpty()) {
+            throw new IllegalStateException("Выбранные сайты не проиндексированны!");
+        }
+
+
+        for (String key : queryLemmas.keySet()) {
+            for (String siteUrl : sitesUrl) {
+                Lemma lemma = lemmaService.findByLemma(key, siteUrl);
+                if (lemma != null && (checkPercent(80, totalPagesSize, lemma.getFrequency()) || queryLemmas.size() == 1)) {
+                    lemmasInDb.add(lemma);
+                }
             }
-            count++;
         }
 
-        return listMap;
+        if(lemmasInDb.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        lemmasInDb.sort(Comparator.comparing(Lemma::getFrequency));
+
+        List<Long> firstLemmaIndexIds = new ArrayList<>();
+        lemmasInDb.get(0).getIndexes().forEach(index -> firstLemmaIndexIds.add(index.getId()));
+        List<Page> pagesResult = new ArrayList<>(pageService.findAllByIndexes(firstLemmaIndexIds));
+
+        for (Lemma lemma : lemmasInDb) {
+            List<Page> tempPages = new ArrayList<>();
+            List<Long> indexIds = new ArrayList<>();
+            if (lemma != lemmasInDb.get(0)) {
+                lemma.getIndexes().forEach(index -> indexIds.add(index.getId()));
+                List<Page> lemmasPages = new ArrayList<>(pageService.findAllByIndexes(indexIds));
+                for (Page page : lemmasPages) {
+                    if (pagesResult.contains(page)) {
+                        tempPages.add(page);
+                    }
+                }
+                pagesResult = new ArrayList<>(tempPages);
+            }
+        }
+
+        List<LemmaPageRank> lemmasPageRanks = new ArrayList<>();
+
+        for (Lemma lemma : lemmasInDb) {
+            for (Index index : lemma.getIndexes()) {
+                if (pagesResult.contains(index.getPage())) {
+                    Page page = index.getPage();
+                    boolean pageExists = false;
+
+                    for (LemmaPageRank lemmaPageRank : lemmasPageRanks) {
+                        if (lemmaPageRank.getPage().equals(page)) {
+                            // Если сущность с этой страницей уже есть, добавляем новую лему в Map
+                            lemmaPageRank.getLemmaRank().put(lemma, index.getRank());
+                            pageExists = true;
+                            break; // Останавливаем поиск, т.к. сущность найдена
+                        }
+                    }
+
+                    // Если сущность с этой страницей не найдена, создаем новую
+                    if (!pageExists) {
+                        HashMap<Lemma, Integer> lemmaRanks = new HashMap<>();
+                        lemmaRanks.put(lemma, index.getRank());
+                        lemmasPageRanks.add(new LemmaPageRank(lemmaRanks, page));
+                    }
+                }
+            }
+        }
+
+        lemmasPageRanks.forEach(LemmaPageRank::calculateRelevance);
+        Float max = 0F;
+        for (LemmaPageRank lemmaPageRank : lemmasPageRanks) {
+            if (lemmaPageRank.getThisRelevance() > max) {
+                max = lemmaPageRank.getThisRelevance();
+            }
+        }
+
+        for (LemmaPageRank lemmaPageRank : lemmasPageRanks) {
+            lemmaPageRank.setTotalRelevance(max);
+            lemmaPageRank.calculateTotalRelevance();
+        }
+
+        lemmasPageRanks.sort(Comparator.comparing(LemmaPageRank::getTotalRelevance).reversed());
+        List<DataResponse> dataResponses = new ArrayList<>();
+
+        for (int i = offset; i < lemmasPageRanks.size(); i++) {
+            if(i >= limit) {
+                break;
+            }
+            DataResponse dataResponse = new DataResponse();
+
+            dataResponse.setUri(lemmasPageRanks.get(i).getPage().getPath());
+            dataResponse.setRelevance(lemmasPageRanks.get(i).getTotalRelevance());
+            Site siteOnPage = lemmasPageRanks.get(i).getPage().getSite();
+            dataResponse.setSite(siteOnPage.getUrl());
+            dataResponse.setSiteName(siteOnPage.getName());
+            String pageContent = lemmasPageRanks.get(i).getPage().getContent();
+            Document document = Jsoup.parse(pageContent);
+            dataResponse.setTitle(document.title());
+            List<String> lemmaList = new ArrayList<>(lemmasPageRanks.get(i).getLemmaRank().keySet().stream().map(Lemma::getLemma).toList());
+            pageContent = LemmasFinder.extractFragmentsWithHighlight(pageContent, lemmaList);
+
+            if(pageContent.length() > 240) {
+                pageContent = pageContent.substring(0, 270);
+                while (!pageContent.endsWith(" ")) {
+                    pageContent = pageContent.substring(0, pageContent.length() - 1);
+                }
+                if(pageContent.endsWith(",")) {
+                    pageContent = pageContent.substring(0, pageContent.length() - 1);
+                }
+            }
+            dataResponse.setSnippet(pageContent);
+
+            dataResponses.add(dataResponse);
+        }
+
+        return dataResponses;
+
     }
 
+    private boolean checkPercent(int percent, int sizePages, int frequency) {
+        int result = frequency * 100 / sizePages;
+        return percent >= result;
+    }
+
+    private void stopWorkers(List<Site> sitesToDb, ForkJoinPool forkJoinPool) {
+        if (!isStartIndexing) {
+            for (Site site : sitesToDb) {
+                site.setLastError("Индексация остановлена пользователем");
+                site.setStatus(Status.FAILED);
+                site.setStatusTime(Instant.now());
+                siteService.update(site);
+            }
+            forkJoinPool.shutdownNow();
+            log.info("Индексация остановлена пользователем");
+        }
+    }
 }

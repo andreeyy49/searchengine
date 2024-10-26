@@ -30,5 +30,6 @@ public class Lemma {
     private Integer frequency;
 
     @OneToMany(mappedBy = "lemma", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
+    @org.hibernate.annotations.BatchSize(size = 500)
     private List<Index> indexes = new ArrayList<>();
 }

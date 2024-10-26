@@ -1,14 +1,14 @@
 package searchengine.controllers;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.lang.Nullable;
 import org.springframework.web.bind.annotation.*;
-import searchengine.dto.statistics.ErrorResponse;
-import searchengine.dto.statistics.IndexingResponse;
-import searchengine.dto.statistics.StatisticsResponse;
+import searchengine.dto.statistics.*;
 import searchengine.services.IndexingService;
 import searchengine.services.StatisticsService;
 
 import java.sql.SQLException;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 @RestController
@@ -45,5 +45,14 @@ public class ApiController {
     public IndexingResponse indexPage(@RequestParam String url) {
         indexingService.indexPage(url);
         return new IndexingResponse(true);
+    }
+
+    @GetMapping("/search")
+    public SearchResponse search(@RequestParam String query,
+                                 @RequestParam @Nullable String site,
+                                 @RequestParam @Nullable Integer offset,
+                                 @RequestParam @Nullable Integer limit) {
+        List<DataResponse> responseList = indexingService.search(query, site, offset, limit);
+        return new SearchResponse(true, responseList.size(), responseList);
     }
 }

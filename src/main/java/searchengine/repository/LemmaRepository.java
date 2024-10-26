@@ -6,5 +6,5 @@ import searchengine.model.Lemma;
 import java.util.Optional;
 
 public interface LemmaRepository extends JpaRepository<Lemma, Long> {
-    Optional<Lemma> findByLemma(String lemma);
+    Optional<Lemma> findByLemmaAndSite_Url(String lemma, String siteUrl);
 }

@@ -5,7 +5,6 @@ import jakarta.persistence.Index;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.BatchSize;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +37,5 @@ public class Page {
     private String content;
 
     @OneToMany(mappedBy = "page", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @BatchSize(size = 100)
     private List<searchengine.model.Index> indexes = new ArrayList<>();
 }

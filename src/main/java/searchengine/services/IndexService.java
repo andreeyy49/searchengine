@@ -15,13 +15,9 @@ public class IndexService {
 
     private final IndexRepository indexRepository;
 
-    public List<Index> findAll() {
-        return indexRepository.findAll();
-    }
-
     public Index findById(Long id) {
         return indexRepository.findById(id)
-                .orElseThrow(()-> new EntityNotFoundException("Данная страница находится за пределами сайтов, указанных в конфигурационном файле"));
+                .orElseThrow(() -> new EntityNotFoundException("Данная страница находится за пределами сайтов, указанных в конфигурационном файле"));
     }
 
     public Index save(Index index) {

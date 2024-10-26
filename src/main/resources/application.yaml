@@ -2,18 +2,22 @@
 
 indexing-settings:
   siteConfigs:
-#    - url: https://sendel.ru
-#      name: sendel.ru
+    - url: https://sendel.ru
+      name: sendel.ru
 #    - url: https://www.lenta.ru
 #      name: Лента.ру
 #    - url: https://www.skillbox.ru
 #      name: Skillbox
-    - url: https://www.playback.ru
-      name: PlayBack.Ru
+#    - url: https://www.playback.ru
+#      name: PlayBack.Ru
 
 server:
   port: 8080
 spring:
+  data:
+    redis:
+      host: localhost
+      port: 6379
   datasource:
     username: postgres
     password: postgres
@@ -25,7 +29,11 @@ spring:
     properties:
 #      dialect: org.hibernate.dialect.MySQL8Dialect
       hibernate:
+        jdbc:
+          batch_size: 500
         default_schema: public
+        order_inserts: true
+        order_updates: true
     hibernate:
       ddl-auto: none
     show-sql: true
@@ -33,3 +41,16 @@ spring:
     url: jdbc:postgresql://localhost:5432/search_engine_db
     user: postgres
     password: postgres
+
+logging:
+  level:
+    org.springframework.transaction: DEBUG
+    org.hibernate.transaction: DEBUG
+
+app:
+  cache:
+    cache-names:
+      - lemmaCache
+    caches:
+      lemmaCache:
+        expire: 10m
