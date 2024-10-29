@@ -205,7 +205,7 @@ public class IndexingService {
             limit = 20;
         }
 
-        if(query.isEmpty()) {
+        if (query.isEmpty()) {
             throw new IllegalStateException("Задан пустой поисковый запрос!");
         }
 
@@ -230,6 +230,12 @@ public class IndexingService {
             throw new IllegalStateException("Выбранные сайты не проиндексированны!");
         }
 
+        if (sitesUrl.size() == 1) {
+            Site siteItem = siteService.findByUrl(sitesUrl.get(0));
+            if(!siteItem.getStatus().equals(Status.INDEXED)) {
+                throw new IllegalStateException("Выбранный сайт не проиндексирован!");
+            }
+        }
 
         for (String key : queryLemmas.keySet()) {
             for (String siteUrl : sitesUrl) {
@@ -240,7 +246,7 @@ public class IndexingService {
             }
         }
 
-        if(lemmasInDb.isEmpty()) {
+        if (lemmasInDb.isEmpty()) {
             return new ArrayList<>();
         }
 
@@ -309,7 +315,7 @@ public class IndexingService {
         List<DataResponse> dataResponses = new ArrayList<>();
 
         for (int i = offset; i < lemmasPageRanks.size(); i++) {
-            if(i >= limit) {
+            if (i >= limit) {
                 break;
             }
             DataResponse dataResponse = new DataResponse();
@@ -325,12 +331,12 @@ public class IndexingService {
             List<String> lemmaList = new ArrayList<>(lemmasPageRanks.get(i).getLemmaRank().keySet().stream().map(Lemma::getLemma).toList());
             pageContent = LemmasFinder.extractFragmentsWithHighlight(pageContent, lemmaList);
 
-            if(pageContent.length() > 240) {
+            if (pageContent.length() > 240) {
                 pageContent = pageContent.substring(0, 270);
                 while (!pageContent.endsWith(" ")) {
                     pageContent = pageContent.substring(0, pageContent.length() - 1);
                 }
-                if(pageContent.endsWith(",")) {
+                if (pageContent.endsWith(",")) {
                     pageContent = pageContent.substring(0, pageContent.length() - 1);
                 }
             }

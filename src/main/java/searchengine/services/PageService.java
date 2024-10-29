@@ -13,7 +13,6 @@ import searchengine.model.Status;
 import searchengine.repository.PageRepository;
 import searchengine.utils.BeanUtils;
 
-import javax.sql.DataSource;
 import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.List;
@@ -23,8 +22,6 @@ import java.util.List;
 public class PageService {
 
     private final PageRepository repository;
-
-    private final DataSource dataSource;
 
     private final SiteService siteService;
 

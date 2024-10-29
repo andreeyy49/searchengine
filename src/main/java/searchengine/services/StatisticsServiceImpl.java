@@ -2,54 +2,50 @@ package searchengine.services;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import searchengine.config.SiteConfig;
-import searchengine.config.SitesList;
 import searchengine.dto.statistics.DetailedStatisticsItem;
 import searchengine.dto.statistics.StatisticsData;
 import searchengine.dto.statistics.StatisticsResponse;
 import searchengine.dto.statistics.TotalStatistics;
+import searchengine.model.Lemma;
+import searchengine.model.Page;
+import searchengine.model.Site;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 
 @Service
 @RequiredArgsConstructor
 public class StatisticsServiceImpl implements StatisticsService {
 
-    private final Random random = new Random();
-    private final SitesList sites;
+    private final SiteService siteService;
+    private final PageService pageService;
+    private final LemmaService lemmaService;
 
     @Override
     public StatisticsResponse getStatistics() {
-        String[] statuses = { "INDEXED", "FAILED", "INDEXING" };
-        String[] errors = {
-                "Ошибка индексации: главная страница сайта не доступна",
-                "Ошибка индексации: сайт не доступен",
-                ""
-        };
+        List<Site> siteList = siteService.findAll();
+        List<Page> pageList = pageService.findAll();
+        List<Lemma> lemmaList = lemmaService.findAll();
 
         TotalStatistics total = new TotalStatistics();
-        total.setSites(sites.getSiteConfigs().size());
+        total.setSites(siteList.size());
+        total.setPages(pageList.size());
+        total.setLemmas(lemmaList.size());
         total.setIndexing(true);
 
         List<DetailedStatisticsItem> detailed = new ArrayList<>();
-        List<SiteConfig> sitesList = sites.getSiteConfigs();
-        for(int i = 0; i < sitesList.size(); i++) {
-            SiteConfig siteConfig = sitesList.get(i);
+
+        for(Site site : siteList) {
             DetailedStatisticsItem item = new DetailedStatisticsItem();
-            item.setName(siteConfig.getName());
-            item.setUrl(siteConfig.getUrl());
-            int pages = random.nextInt(1_000);
-            int lemmas = pages * random.nextInt(1_000);
+            item.setName(site.getName());
+            item.setUrl(site.getUrl());
+            int pages = site.getPages().size();
+            int lemmas = site.getLemmas().size();
             item.setPages(pages);
             item.setLemmas(lemmas);
-            item.setStatus(statuses[i % 3]);
-            item.setError(errors[i % 3]);
-            item.setStatusTime(System.currentTimeMillis() -
-                    (random.nextInt(10_000)));
-            total.setPages(total.getPages() + pages);
-            total.setLemmas(total.getLemmas() + lemmas);
+            item.setStatus(site.getStatus().toString());
+            item.setError(site.getLastError());
+            item.setStatusTime(site.getStatusTime().toEpochMilli());
             detailed.add(item);
         }
 
